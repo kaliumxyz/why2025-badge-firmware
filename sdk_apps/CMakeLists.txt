@@ -119,10 +119,10 @@ function(build_app app_name)
     set_property(GLOBAL APPEND PROPERTY SDK_APP_BUILD_TARGETS build_app_${app_name})
 endfunction()
 
-build_app(hello
-    SOURCES 
-     main.c
-)
+#build_app(hello
+#    SOURCES 
+#     main.c
+#)
 
 #build_app(bench_basic_a
 #    SOURCES 
@@ -133,28 +133,28 @@ build_app(hello
 #    SOURCES
 #     bench_basic_b.c
 #)
-#
+
 #build_app(framebuffer_test
 #    SOURCES
 #     framebuffer_test_a.c
 #)
-#
-#build_app(hardware_test
-#    SOURCES
-#     thirdparty/microui.c
-#     test_badge.c
-#     test_drawing_helper.c
-#     test_keyboard.c
-#     run_tests.c
-#)
-#
-build_app(sdl_test
+
+build_app(hardware_test
     SOURCES
-     sdl_test.c
-    LIBRARIES
-     sdl3
+     thirdparty/microui.c
+     test_badge.c
+     test_drawing_helper.c
+     test_keyboard.c
+     run_tests.c
 )
-#
+
+#build_app(sdl_test
+#    SOURCES
+#     sdl_test.c
+#    LIBRARIES
+#     sdl3
+#)
+
 #build_app(wifi_test
 #    SOURCES
 #     wifi_test.c
@@ -164,12 +164,12 @@ build_app(sdl_test
 #    SOURCES
 #     socket_test.c
 #)
-#
+
 #build_app(curl_test
 #    SOURCES
 #     curl_test.c
 #)
-#
+
 #build_app(bmi270_test
 #    SOURCES
 #     bmi270_test.c
@@ -208,11 +208,11 @@ build_app(sdl_test
 #     thirdparty/microui.c
 #)
 
-build_app(why2025_sponsors
-    SOURCES
-     main.c
-     image.c
-)
+#build_app(why2025_sponsors
+#    SOURCES
+#     main.c
+#     image.c
+#)
 
 #build_app(badge
 #    SOURCES
@@ -220,28 +220,28 @@ build_app(why2025_sponsors
 #     image.c
 #)
 
-build_app(why2025_ota
-    SOURCES
-     main.c
-     window.c
-     ota_update.c
-     thirdparty/cJSON.c
-    LIBRARIES
-     sdl3
-)
+#build_app(why2025_ota
+#    SOURCES
+#     main.c
+#     window.c
+#     ota_update.c
+#     thirdparty/cJSON.c
+#    LIBRARIES
+#     sdl3
+#)
 
-build_app(badgevms_launcher
-    SOURCES
-     main.c
-)
+#build_app(badgevms_launcher
+#    SOURCES
+#     main.c
+#)
 
-build_app(why2025_namebadge
-    SOURCES
-     main.c
-     image.c
-    LIBRARIES
-     sdl3
-)
+#build_app(why2025_namebadge
+#    SOURCES
+#     main.c
+#     image.c
+#    LIBRARIES
+#     sdl3
+#)
 
 #build_app(doomgeneric
 #    SOURCES
