@@ -208,11 +208,11 @@ build_app(sdl_test
 #     thirdparty/microui.c
 #)
 
-build_app(why2025_sponsors
-    SOURCES
-     main.c
-     image.c
-)
+#build_app(why2025_sponsors
+#    SOURCES
+#     main.c
+#     image.c
+#)
 
 #build_app(badge
 #    SOURCES
@@ -242,11 +242,11 @@ build_app(badgevms_settings
      sdl3
 )
 
-build_app(why2025_namebadge
-    SOURCES
-     main.c
-     image.c
-)
+#build_app(why2025_namebadge
+#    SOURCES
+#     main.c
+#     image.c
+#)
 
 #build_app(doomgeneric
 #    SOURCES
