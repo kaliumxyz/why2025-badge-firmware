@@ -1,3 +1,5 @@
+
+// #include "driver/gpio.h"
 #include "font.h"
 
 #include <stdio.h>
@@ -5,9 +7,15 @@
 
 #include <badgevms/application.h>
 #include <badgevms/compositor.h>
+#include <badgevms/device.h>
 #include <badgevms/event.h>
+#include <badgevms/framebuffer.h>
 #include <badgevms/keyboard.h>
+#include <ctype.h>
+#include <math.h>
 #include <string.h>
+#include <time.h>
+#include <unistd.h>
 
 #define SCREEN_WIDTH  720
 #define SCREEN_HEIGHT 720
@@ -28,6 +36,14 @@ typedef struct {
 } Theme;
 
 typedef struct {
+    bool  enabled;
+    int   count;
+    int   max;
+    char *buffer;
+
+} Capture;
+
+typedef struct {
     window_handle_t window;
     framebuffer_t  *framebuffer;
     uint16_t       *pixels;
@@ -36,6 +52,7 @@ typedef struct {
     int             selected_item;
     int             total_items;
     int             items_per_page;
+    int             themeCursor;
     bool            show_settings;
     Theme           theme[4];
     int             themeActive;
@@ -43,6 +60,7 @@ typedef struct {
     bool            quit;
     bool            buzz;
     int             bl;
+    Capture         capture;
 } Context;
 
 static void draw_rect(Context *ctx, int x, int y, int w, int h, uint16_t color) {
@@ -145,11 +163,23 @@ static void draw_settings_dialog(Context *ctx) {
     int swats_y = content_y + 80;
 
     int swat_offset   = 50;
-    int swat_distance = 100;
+    int swat_distance = 90;
 
     // color swats, one swat per theme. one for custom?
     // or custom maybe using a button below for more explicit.
     // allow saving to swats?
+    // indicator
+    draw_rect(ctx, dialog_x + swat_offset + swat_distance * ctx->themeActive, swats_y + 75, 75, 5, 0xffc0);
+    draw_3d_border(
+        ctx,
+        dialog_x + swat_offset + swat_distance * ctx->themeActive,
+        swats_y,
+        75,
+        80,
+        1,
+        ctx->themeActive
+    );
+
     draw_rect(ctx, dialog_x + swat_offset, swats_y, 75, 75, ctx->theme[0].bg);
     draw_3d_border(ctx, dialog_x + swat_offset, swats_y, 75, 75, 1, 0);
 
@@ -162,39 +192,61 @@ static void draw_settings_dialog(Context *ctx) {
     draw_rect(ctx, dialog_x + swat_offset + swat_distance * 3, swats_y, 75, 75, ctx->theme[3].bg);
     draw_3d_border(ctx, dialog_x + swat_offset + swat_distance * 3, swats_y, 75, 75, 1, 3);
 
-
-    draw_3d_border(ctx, dialog_x + swat_offset + swat_distance * ctx->themeActive, swats_y, 75, 75, 1, 4);
-
-
-    draw_rect(ctx, dialog_x + swat_offset, swats_y + 100, 75, 75, ctx->theme[ctx->themeActive].selected_bg);
-    draw_char(ctx, dialog_x + swat_offset, swats_y + 100, 'A', ctx->theme[ctx->themeActive].text_selected);
-    draw_3d_border(ctx, dialog_x + swat_offset, swats_y + 100, 75, 75, 1, ctx->themeActive);
-
-    draw_rect(ctx, dialog_x + swat_offset + swat_distance, swats_y + 100, 75, 75, ctx->theme[ctx->themeActive].popup);
-    draw_char(
-        ctx,
-        dialog_x + swat_offset + swat_distance,
-        swats_y + 100,
-        'A',
-        ctx->theme[ctx->themeActive].text_inactive
-    );
-    draw_3d_border(ctx, dialog_x + swat_offset + swat_distance, swats_y + 100, 75, 75, 1, ctx->themeActive);
-
-    draw_rect(ctx, dialog_x + swat_offset + swat_distance * 2, swats_y + 100, 75, 75, ctx->theme[ctx->themeActive].fg);
-    draw_char(ctx, dialog_x + swat_offset + swat_distance * 2, swats_y + 100, 'A', ctx->theme[ctx->themeActive].text);
-    draw_3d_border(ctx, dialog_x + swat_offset + swat_distance * 2, swats_y + 100, 75, 75, 1, ctx->themeActive);
-
-    draw_rect(ctx, dialog_x + swat_offset + swat_distance * 3, swats_y + 100, 75, 75, ctx->theme[ctx->themeActive].bg);
-    draw_rect(ctx, dialog_x + swat_offset + swat_distance * 3, swats_y + 100, 20, 75, ctx->theme[ctx->themeActive].fg);
+    // swats for curent theme
+    draw_rect(ctx, dialog_x + swat_offset - 5, swats_y + 100, 30, 75, ctx->theme[ctx->themeActive].bg);
+    draw_rect(ctx, dialog_x + swat_offset - 5 + 30, swats_y + 100, 30, 75, ctx->theme[ctx->themeActive].fg);
+    draw_rect(ctx, dialog_x + swat_offset - 5 + 30 * 2, swats_y + 100, 30, 75, ctx->theme[ctx->themeActive].panel);
     draw_rect(
         ctx,
-        dialog_x + swat_offset + 20 + swat_distance * 3,
+        dialog_x + swat_offset - 5 + 30 * 3,
         swats_y + 100,
-        20,
+        30,
         75,
-        ctx->theme[ctx->themeActive].panel
+        ctx->theme[ctx->themeActive].border_light
     );
-    draw_3d_border(ctx, dialog_x + swat_offset + swat_distance * 3, swats_y + 100, 75, 75, 1, ctx->themeActive);
+    draw_rect(
+        ctx,
+        dialog_x + swat_offset - 5 + 30 * 4,
+        swats_y + 100,
+        30,
+        75,
+        ctx->theme[ctx->themeActive].border_dark
+    );
+    draw_rect(ctx, dialog_x + swat_offset - 5 + 30 * 5, swats_y + 100, 30, 75, ctx->theme[ctx->themeActive].button);
+    draw_rect(
+        ctx,
+        dialog_x + swat_offset - 5 + 30 * 6,
+        swats_y + 100,
+        30,
+        75,
+        ctx->theme[ctx->themeActive].selected_bg
+    );
+    draw_rect(ctx, dialog_x + swat_offset - 5 + 30 * 7, swats_y + 100, 30, 75, ctx->theme[ctx->themeActive].title_bg);
+    draw_rect(ctx, dialog_x + swat_offset - 5 + 30 * 8, swats_y + 100, 30, 75, ctx->theme[ctx->themeActive].text);
+    draw_rect(
+        ctx,
+        dialog_x + swat_offset - 5 + 30 * 9,
+        swats_y + 100,
+        30,
+        75,
+        ctx->theme[ctx->themeActive].text_selected
+    );
+    draw_rect(
+        ctx,
+        dialog_x + swat_offset - 5 + 30 * 10,
+        swats_y + 100,
+        30,
+        75,
+        ctx->theme[ctx->themeActive].text_inactive
+    );
+    draw_rect(ctx, dialog_x + swat_offset - 5 + 30 * 11, swats_y + 100, 30, 75, ctx->theme[ctx->themeActive].popup);
+
+    // cursor
+    draw_rect(ctx, dialog_x + swat_offset + 30 * ctx->themeCursor, swats_y + 100 + 60, 15, 8, 0xffc0);
+
+    draw_3d_border(ctx, dialog_x + swat_offset - 5, swats_y + 100, 30 * 12, 75, 1, ctx->themeActive);
+
+
 
     // draw_rect(ctx, dialog_x + swat_offset + swat_distance * 8, swats_y, 20, 20,
     // ctx->theme[ctx->themeActive].border_dark); draw_3d_border(ctx, dialog_x + swat_offset + swat_distance * 8,
@@ -211,7 +263,7 @@ static void draw_settings_dialog(Context *ctx) {
     draw_text_centered(
         ctx,
         dialog_x,
-        swats_y + 200,
+        swats_y - 40,
         dialog_w,
         "Press ENTER or ESC to save or close",
         ctx->theme[ctx->themeActive].text_inactive
@@ -346,6 +398,156 @@ static void draw_launcher_window(Context *ctx) {
     );
 }
 
+#define SAVE_FILE "APPS:[badgevms_launcher]theme.txt"
+
+static bool load(Context *ctx) {
+    FILE *file = fopen(SAVE_FILE, "r");
+    if (!file) {
+        printf("No saved state found at %s\n", SAVE_FILE);
+        return false;
+    }
+
+
+    int offset = 12;
+    int size   = offset * 4 + 2;
+
+    uint16_t buffer[size];
+
+    if (fread(buffer, sizeof(buffer), size, file)) {
+        int index = (int)buffer;
+        if (index >= 0 && index < 4) {
+            ctx->themeActive = index;
+        }
+        printf("%X", index);
+    }
+
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 12; j++) {
+            printf("%X", buffer[i * offset + j]);
+        }
+        ctx->theme[i].bg            = buffer[i * offset + 1];
+        ctx->theme[i].fg            = buffer[i * offset + 2];
+        ctx->theme[i].panel         = buffer[i * offset + 3];
+        ctx->theme[i].border_light  = buffer[i * offset + 4];
+        ctx->theme[i].border_dark   = buffer[i * offset + 5];
+        ctx->theme[i].text          = buffer[i * offset + 6];
+        ctx->theme[i].selected_bg   = buffer[i * offset + 7];
+        ctx->theme[i].text_selected = buffer[i * offset + 8];
+        ctx->theme[i].button        = buffer[i * offset + 9];
+        ctx->theme[i].title_bg      = buffer[i * offset + 10];
+        ctx->theme[i].text_inactive = buffer[i * offset + 11];
+        ctx->theme[i].popup         = buffer[i * offset + 12];
+    }
+    fclose(file);
+    printf("State loaded from %s\n", SAVE_FILE);
+    return true;
+}
+static bool save(Context *ctx) {
+    // Work around the truncation bug by removing the file first
+    remove(SAVE_FILE);
+
+    FILE *file = fopen(SAVE_FILE, "w");
+
+    if (!file) {
+        printf("Failed to save state to %s\n", SAVE_FILE);
+        return false;
+    }
+
+    int offset = 12;
+    int size   = offset * 4 + 2;
+
+    uint16_t buff[size];
+
+    buff[0] = (uint16_t)ctx->themeActive;
+
+
+    for (int i = 0; i < 3; i++) {
+        buff[i * offset + 1]  = ctx->theme[i].bg;
+        buff[i * offset + 2]  = ctx->theme[i].fg;
+        buff[i * offset + 3]  = ctx->theme[i].panel;
+        buff[i * offset + 4]  = ctx->theme[i].border_light;
+        buff[i * offset + 5]  = ctx->theme[i].border_dark;
+        buff[i * offset + 6]  = ctx->theme[i].text;
+        buff[i * offset + 7]  = ctx->theme[i].selected_bg;
+        buff[i * offset + 8]  = ctx->theme[i].text_selected;
+        buff[i * offset + 9]  = ctx->theme[i].button;
+        buff[i * offset + 10] = ctx->theme[i].title_bg;
+        buff[i * offset + 11] = ctx->theme[i].text_inactive;
+        buff[i * offset + 12] = ctx->theme[i].popup;
+    }
+    fwrite(buff, sizeof buff[0], size, file);
+
+    fclose(file);
+    printf("State saved to %s\n", SAVE_FILE);
+
+    return true;
+}
+
+/**
+ * hex2int
+ * take a hex string and convert it to a 32bit number (max 8 hex digits)
+ */
+uint16_t hex2int(char *hex) {
+    uint16_t val = 0;
+    while (*hex) {
+        // get current character then increment
+        uint8_t byte = *hex++;
+        // transform hex character to the 4bit equivalent number, using the ascii table indexes
+        if (byte >= '0' && byte <= '9')
+            byte = byte - '0';
+        else if (byte >= 'a' && byte <= 'f')
+            byte = byte - 'a' + 10;
+        else if (byte >= 'A' && byte <= 'F')
+            byte = byte - 'A' + 10;
+        // shift 4 to make space for new digit, and add the 4 bits of the new digit
+        val = (val << 4) | (byte & 0xF);
+    }
+    return val;
+}
+
+static void handle_keyboard_capture(Context *ctx, keyboard_scancode_t key_code) {
+    if (ctx->capture.count > 3) {
+        switch (ctx->themeCursor) {
+            case 0: ctx->theme[ctx->themeActive].bg = hex2int(ctx->capture.buffer); break;
+            case 1: ctx->theme[ctx->themeActive].fg = hex2int(ctx->capture.buffer); break;
+            case 2: ctx->theme[ctx->themeActive].panel = hex2int(ctx->capture.buffer); break;
+            case 3: ctx->theme[ctx->themeActive].border_light = hex2int(ctx->capture.buffer); break;
+            case 4: ctx->theme[ctx->themeActive].border_dark = hex2int(ctx->capture.buffer); break;
+            case 5: ctx->theme[ctx->themeActive].text = hex2int(ctx->capture.buffer); break;
+            case 6: ctx->theme[ctx->themeActive].selected_bg = hex2int(ctx->capture.buffer); break;
+            case 7: ctx->theme[ctx->themeActive].text_selected = hex2int(ctx->capture.buffer); break;
+            case 8: ctx->theme[ctx->themeActive].button = hex2int(ctx->capture.buffer); break;
+            case 9: ctx->theme[ctx->themeActive].title_bg = hex2int(ctx->capture.buffer); break;
+            case 10: ctx->theme[ctx->themeActive].text_inactive = hex2int(ctx->capture.buffer); break;
+            case 11: ctx->theme[ctx->themeActive].popup = hex2int(ctx->capture.buffer); break;
+        }
+        ctx->capture.buffer  = "";
+        ctx->capture.count   = 0;
+        ctx->capture.enabled = false;
+        return;
+    }
+    switch (key_code) {
+        case KEY_SCANCODE_0: ctx->capture.buffer += '0'; break;
+        case KEY_SCANCODE_1: ctx->capture.buffer += '1'; break;
+        case KEY_SCANCODE_2: ctx->capture.buffer += '2'; break;
+        case KEY_SCANCODE_3: ctx->capture.buffer += '3'; break;
+        case KEY_SCANCODE_4: ctx->capture.buffer += '4'; break;
+        case KEY_SCANCODE_5: ctx->capture.buffer += '5'; break;
+        case KEY_SCANCODE_6: ctx->capture.buffer += '6'; break;
+        case KEY_SCANCODE_7: ctx->capture.buffer += '7'; break;
+        case KEY_SCANCODE_8: ctx->capture.buffer += '8'; break;
+        case KEY_SCANCODE_9: ctx->capture.buffer += '9'; break;
+        case KEY_SCANCODE_A: ctx->capture.buffer += 'a'; break;
+        case KEY_SCANCODE_B: ctx->capture.buffer += 'b'; break;
+        case KEY_SCANCODE_C: ctx->capture.buffer += 'c'; break;
+        case KEY_SCANCODE_D: ctx->capture.buffer += 'd'; break;
+        case KEY_SCANCODE_E: ctx->capture.buffer += 'e'; break;
+        case KEY_SCANCODE_F: ctx->capture.buffer += 'f'; break;
+        case KEY_SCANCODE_ESCAPE: ctx->capture.enabled = false; break;
+    }
+    ctx->capture.count++;
+}
+
 static void handle_keyboard_settings(Context *ctx, keyboard_scancode_t key_code) {
     switch (key_code) {
         case KEY_SCANCODE_SQUARE: ctx->themeActive = 0; break;
@@ -360,26 +562,97 @@ static void handle_keyboard_settings(Context *ctx, keyboard_scancode_t key_code)
 
         case KEY_SCANCODE_DIAMOND: ctx->buzz = false; break;
 
+        case KEY_SCANCODE_L: load(ctx); break;
+
+        case KEY_SCANCODE_K: save(ctx); break;
+
+        // case KEY_SCANCODE_LEFT:
+        //     if (ctx->themeActive > 0) {
+        //         ctx->themeActive -= 1;
+        //     } else {
+        //         ctx->themeActive = 3;
+        //     }
+        //     break;
+
+        // case KEY_SCANCODE_RIGHT:
+        //     if (ctx->themeActive < 3) {
+        //         ctx->themeActive += 1;
+        //     } else {
+        //         ctx->themeActive = 0;
+        //     }
+        //     break;
         case KEY_SCANCODE_LEFT:
-            if (ctx->themeActive > 0) {
-                ctx->themeActive -= 1;
+            if (ctx->themeCursor > 0) {
+                ctx->themeCursor -= 1;
             } else {
-                ctx->themeActive = 3;
+                ctx->themeCursor = 11;
             }
             break;
 
         case KEY_SCANCODE_RIGHT:
-            if (ctx->themeActive < 3) {
-                ctx->themeActive += 1;
+            if (ctx->themeCursor < 11) {
+                ctx->themeCursor += 1;
             } else {
-                ctx->themeActive = 0;
+                ctx->themeCursor = 0;
             }
             break;
-        case KEY_SCANCODE_ESCAPE: ctx->show_settings = false; break;
+
+        case KEY_SCANCODE_SPACE:
+            ctx->capture.enabled = true;
+            ctx->capture.buffer  = "";
+            break;
+
+        case KEY_SCANCODE_UP:
+            switch (ctx->themeCursor) {
+                case 0: ctx->theme[ctx->themeActive].bg++; break;
+                case 1: ctx->theme[ctx->themeActive].fg++; break;
+                case 2: ctx->theme[ctx->themeActive].panel++; break;
+                case 3: ctx->theme[ctx->themeActive].border_light++; break;
+                case 4: ctx->theme[ctx->themeActive].border_dark++; break;
+                case 5: ctx->theme[ctx->themeActive].text++; break;
+                case 6: ctx->theme[ctx->themeActive].selected_bg++; break;
+                case 7: ctx->theme[ctx->themeActive].text_selected++; break;
+                case 8: ctx->theme[ctx->themeActive].button++; break;
+                case 9: ctx->theme[ctx->themeActive].title_bg++; break;
+                case 10: ctx->theme[ctx->themeActive].text_inactive++; break;
+                case 11: ctx->theme[ctx->themeActive].popup++; break;
+            }
+            break;
+
+        case KEY_SCANCODE_DOWN:
+            switch (ctx->themeCursor) {
+                case 0: ctx->theme[ctx->themeActive].bg--; break;
+                case 1: ctx->theme[ctx->themeActive].fg--; break;
+                case 2: ctx->theme[ctx->themeActive].panel--; break;
+                case 3: ctx->theme[ctx->themeActive].border_light--; break;
+                case 4: ctx->theme[ctx->themeActive].border_dark--; break;
+                case 5: ctx->theme[ctx->themeActive].text--; break;
+                case 6: ctx->theme[ctx->themeActive].selected_bg--; break;
+                case 7: ctx->theme[ctx->themeActive].text_selected--; break;
+                case 8: ctx->theme[ctx->themeActive].button--; break;
+                case 9: ctx->theme[ctx->themeActive].title_bg--; break;
+                case 10: ctx->theme[ctx->themeActive].text_inactive--; break;
+                case 11: ctx->theme[ctx->themeActive].popup--; break;
+            }
+            break;
+        case KEY_SCANCODE_ESCAPE:
+            ctx->show_settings = false;
+            load(ctx);
+            break;
+
+        case KEY_SCANCODE_RETURN:
+            ctx->show_settings = false;
+            save(ctx);
+            break;
     }
 }
 
 static void handle_keyboard(Context *ctx, keyboard_scancode_t key_code) {
+    if (ctx->capture.enabled && ctx->capture.count < ctx->capture.max) {
+        return handle_keyboard_capture(ctx, key_code);
+    } else {
+        ctx->capture.enabled = false;
+    }
 
     if (ctx->show_settings) {
         return handle_keyboard_settings(ctx, key_code);
@@ -486,7 +759,20 @@ static bool run_launcher(application_t **applications, size_t num) {
     ctx.theme[3].text_inactive = 0xbe19;
     ctx.theme[3].popup         = 0x528a;
 
+    ctx.theme[4].text = 0xFFFF;
+
     ctx.themeActive = 0;
+
+    if (!load(&ctx)) {
+        printf("failed to load prior state");
+    }
+
+
+    char keystroke_buffer[64];
+
+    Capture cap = {enabled : false, buffer : keystroke_buffer};
+
+    ctx.capture = cap;
 
     ctx.applications  = applications;
     ctx.total_items   = num;
