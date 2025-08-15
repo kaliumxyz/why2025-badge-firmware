@@ -12,16 +12,20 @@
 #define SCREEN_WIDTH  720
 #define SCREEN_HEIGHT 720
 
-#define CDE_BG_COLOR      0x9CA0A0
-#define CDE_PANEL_COLOR   0xAEB2B2
-#define CDE_BORDER_LIGHT  0xFFFFFF
-#define CDE_BORDER_DARK   0x636363
-#define CDE_TEXT_COLOR    0x000000
-#define CDE_SELECTED_BG   0x0078D4
-#define CDE_SELECTED_TEXT 0xFFFFFF
-#define CDE_BUTTON_COLOR  0xD4D0C8
-#define CDE_TITLE_BG      0x808080
-#define CDE_INACTIVE_TEXT 0x808080
+typedef struct {
+    uint16_t bg;
+    uint16_t fg;
+    uint16_t panel;
+    uint16_t border_light;
+    uint16_t border_dark;
+    uint16_t text;
+    uint16_t selected_bg;
+    uint16_t button;
+    uint16_t title_bg;
+    uint16_t text_selected;
+    uint16_t text_inactive;
+    uint16_t popup;
+} Theme;
 
 typedef struct {
     window_handle_t window;
@@ -32,21 +36,18 @@ typedef struct {
     int             selected_item;
     int             total_items;
     int             items_per_page;
-    bool            show_about;
+    bool            show_settings;
+    Theme           theme[4];
+    int             themeActive;
+    bool            show_theme;
     bool            quit;
-} Launcher_Context;
+    bool            buzz;
+    int             bl;
+} Context;
 
-static inline uint16_t rgb888_to_rgb565_color(uint32_t rgb888) {
-    uint8_t r = (rgb888 >> 16) & 0xFF;
-    uint8_t g = (rgb888 >> 8) & 0xFF;
-    uint8_t b = rgb888 & 0xFF;
-    return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
-}
-
-static void draw_rect(Launcher_Context *ctx, int x, int y, int w, int h, uint32_t color) {
-    uint16_t rgb565 = rgb888_to_rgb565_color(color);
-    int      x2     = x + w;
-    int      y2     = y + h;
+static void draw_rect(Context *ctx, int x, int y, int w, int h, uint16_t color) {
+    int x2 = x + w;
+    int y2 = y + h;
 
     if (x < 0)
         x = 0;
@@ -61,18 +62,17 @@ static void draw_rect(Launcher_Context *ctx, int x, int y, int w, int h, uint32_
         uint16_t *row   = &ctx->pixels[py * SCREEN_WIDTH + x];
         int       width = x2 - x;
         for (int i = 0; i < width; i++) {
-            row[i] = rgb565;
+            row[i] = color;
         }
     }
 }
 
-static void draw_char(Launcher_Context *ctx, int x, int y, char c, uint32_t color) {
+static void draw_char(Context *ctx, int x, int y, char c, uint16_t color) {
     if (c < FONT_FIRST_CHAR || c > FONT_LAST_CHAR)
         return;
 
     int             char_index = c - FONT_FIRST_CHAR;
     uint16_t const *char_data  = pixel_font[char_index];
-    uint16_t        rgb565     = rgb888_to_rgb565_color(color);
 
     for (int row = 0; row < FONT_HEIGHT; row++) {
         uint16_t row_data = char_data[row];
@@ -85,14 +85,14 @@ static void draw_char(Launcher_Context *ctx, int x, int y, char c, uint32_t colo
             if (row_data & (0x800 >> col)) {
                 int px = x + col;
                 if (px >= 0 && px < SCREEN_WIDTH) {
-                    ctx->pixels[py * SCREEN_WIDTH + px] = rgb565;
+                    ctx->pixels[py * SCREEN_WIDTH + px] = color;
                 }
             }
         }
     }
 }
 
-static void draw_text(Launcher_Context *ctx, int x, int y, char const *text, uint32_t color) {
+static void draw_text(Context *ctx, int x, int y, char const *text, uint16_t color) {
     int current_x = x;
     while (*text) {
         draw_char(ctx, current_x, y, *text, color);
@@ -101,24 +101,20 @@ static void draw_text(Launcher_Context *ctx, int x, int y, char const *text, uin
     }
 }
 
-static void draw_text_bold(Launcher_Context *ctx, int x, int y, char const *text, uint32_t color) {
+static void draw_text_bold(Context *ctx, int x, int y, char const *text, uint16_t color) {
     draw_text(ctx, x, y, text, color);
     draw_text(ctx, x + 1, y, text, color);
 }
 
-static int get_text_width(char const *text) {
-    return strlen(text) * FONT_WIDTH;
-}
-
-static void draw_text_centered(Launcher_Context *ctx, int x, int y, int width, char const *text, uint32_t color) {
-    int text_w = get_text_width(text);
+static void draw_text_centered(Context *ctx, int x, int y, int width, char const *text, uint16_t color) {
+    int text_w = strlen(text) * FONT_WIDTH;
     int text_x = x + (width - text_w) / 2;
     draw_text(ctx, text_x, y, text, color);
 }
 
-static void draw_3d_border(Launcher_Context *ctx, int x, int y, int w, int h, int inset) {
-    uint32_t light_color = inset ? CDE_BORDER_DARK : CDE_BORDER_LIGHT;
-    uint32_t dark_color  = inset ? CDE_BORDER_LIGHT : CDE_BORDER_DARK;
+static void draw_3d_border(Context *ctx, int x, int y, int w, int h, int inset, int themeActive) {
+    uint16_t light_color = inset ? ctx->theme[themeActive].border_dark : ctx->theme[themeActive].border_light;
+    uint16_t dark_color  = inset ? ctx->theme[themeActive].border_light : ctx->theme[themeActive].border_dark;
 
     draw_rect(ctx, x, y, w, 2, light_color);
     draw_rect(ctx, x, y, 2, h, light_color);
@@ -127,61 +123,121 @@ static void draw_3d_border(Launcher_Context *ctx, int x, int y, int w, int h, in
     draw_rect(ctx, x + w - 2, y, 2, h, dark_color);
 }
 
-static void draw_button(Launcher_Context *ctx, int x, int y, int w, int h, char const *text, int pressed) {
-    draw_rect(ctx, x, y, w, h, CDE_BUTTON_COLOR);
-    draw_3d_border(ctx, x, y, w, h, pressed);
-
-    int text_y = y + (h - FONT_HEIGHT) / 2;
-    if (pressed) {
-        text_y += 1;
-    }
-    draw_text_centered(ctx, x, text_y, w, text, CDE_TEXT_COLOR);
-}
-
-static void draw_about_dialog(Launcher_Context *ctx) {
+static void draw_settings_dialog(Context *ctx) {
     int dialog_w = 450;
     int dialog_h = 350;
     int dialog_x = (SCREEN_WIDTH - dialog_w) / 2;
     int dialog_y = (SCREEN_HEIGHT - dialog_h) / 2;
 
-    draw_rect(ctx, dialog_x + 5, dialog_y + 5, dialog_w, dialog_h, 0x505050);
+    draw_rect(ctx, dialog_x + 5, dialog_y + 5, dialog_w, dialog_h, ctx->theme[ctx->themeActive].popup);
 
-    draw_rect(ctx, dialog_x, dialog_y, dialog_w, dialog_h, CDE_PANEL_COLOR);
-    draw_3d_border(ctx, dialog_x, dialog_y, dialog_w, dialog_h, 0);
+    draw_rect(ctx, dialog_x, dialog_y, dialog_w, dialog_h, ctx->theme[ctx->themeActive].panel);
+    draw_3d_border(ctx, dialog_x, dialog_y, dialog_w, dialog_h, 0, ctx->themeActive);
 
     int title_h = 30;
-    draw_rect(ctx, dialog_x + 2, dialog_y + 2, dialog_w - 4, title_h, CDE_TITLE_BG);
-    draw_text_bold(ctx, dialog_x + 10, dialog_y + 8, "About BadgeVMS", CDE_SELECTED_TEXT);
+    draw_rect(ctx, dialog_x + 2, dialog_y + 2, dialog_w - 4, title_h, ctx->theme[ctx->themeActive].title_bg);
+    draw_text_bold(ctx, dialog_x + 10, dialog_y + 8, "Themes", ctx->theme[ctx->themeActive].text_selected);
 
     int content_y = dialog_y + title_h + 30;
-    draw_text_centered(ctx, dialog_x, content_y, dialog_w, "BadgeVMS", CDE_TEXT_COLOR);
-    draw_text_centered(ctx, dialog_x, content_y + 30, dialog_w, "Version 1.0", CDE_TEXT_COLOR);
+
+    draw_text_centered(ctx, dialog_x, content_y, dialog_w, "Pick a theme", ctx->theme[ctx->themeActive].text);
+
+    int swats_y = content_y + 80;
+
+    int swat_offset   = 50;
+    int swat_distance = 100;
+
+    // color swats, one swat per theme. one for custom?
+    // or custom maybe using a button below for more explicit.
+    // allow saving to swats?
+    draw_rect(ctx, dialog_x + swat_offset, swats_y, 75, 75, ctx->theme[0].bg);
+    draw_3d_border(ctx, dialog_x + swat_offset, swats_y, 75, 75, 1, 0);
+
+    draw_rect(ctx, dialog_x + swat_offset + swat_distance, swats_y, 75, 75, ctx->theme[1].bg);
+    draw_3d_border(ctx, dialog_x + swat_offset + swat_distance, swats_y, 75, 75, 1, 1);
+
+    draw_rect(ctx, dialog_x + swat_offset + swat_distance * 2, swats_y, 75, 75, ctx->theme[2].bg);
+    draw_3d_border(ctx, dialog_x + swat_offset + swat_distance * 2, swats_y, 75, 75, 1, 2);
+
+    draw_rect(ctx, dialog_x + swat_offset + swat_distance * 3, swats_y, 75, 75, ctx->theme[3].bg);
+    draw_3d_border(ctx, dialog_x + swat_offset + swat_distance * 3, swats_y, 75, 75, 1, 3);
+
+
+    draw_3d_border(ctx, dialog_x + swat_offset + swat_distance * ctx->themeActive, swats_y, 75, 75, 1, 4);
+
+
+    draw_rect(ctx, dialog_x + swat_offset, swats_y + 100, 75, 75, ctx->theme[ctx->themeActive].selected_bg);
+    draw_char(ctx, dialog_x + swat_offset, swats_y + 100, 'A', ctx->theme[ctx->themeActive].text_selected);
+    draw_3d_border(ctx, dialog_x + swat_offset, swats_y + 100, 75, 75, 1, ctx->themeActive);
+
+    draw_rect(ctx, dialog_x + swat_offset + swat_distance, swats_y + 100, 75, 75, ctx->theme[ctx->themeActive].popup);
+    draw_char(
+        ctx,
+        dialog_x + swat_offset + swat_distance,
+        swats_y + 100,
+        'A',
+        ctx->theme[ctx->themeActive].text_inactive
+    );
+    draw_3d_border(ctx, dialog_x + swat_offset + swat_distance, swats_y + 100, 75, 75, 1, ctx->themeActive);
+
+    draw_rect(ctx, dialog_x + swat_offset + swat_distance * 2, swats_y + 100, 75, 75, ctx->theme[ctx->themeActive].fg);
+    draw_char(ctx, dialog_x + swat_offset + swat_distance * 2, swats_y + 100, 'A', ctx->theme[ctx->themeActive].text);
+    draw_3d_border(ctx, dialog_x + swat_offset + swat_distance * 2, swats_y + 100, 75, 75, 1, ctx->themeActive);
+
+    draw_rect(ctx, dialog_x + swat_offset + swat_distance * 3, swats_y + 100, 75, 75, ctx->theme[ctx->themeActive].bg);
+    draw_rect(ctx, dialog_x + swat_offset + swat_distance * 3, swats_y + 100, 20, 75, ctx->theme[ctx->themeActive].fg);
+    draw_rect(
+        ctx,
+        dialog_x + swat_offset + 20 + swat_distance * 3,
+        swats_y + 100,
+        20,
+        75,
+        ctx->theme[ctx->themeActive].panel
+    );
+    draw_3d_border(ctx, dialog_x + swat_offset + swat_distance * 3, swats_y + 100, 75, 75, 1, ctx->themeActive);
+
+    // draw_rect(ctx, dialog_x + swat_offset + swat_distance * 8, swats_y, 20, 20,
+    // ctx->theme[ctx->themeActive].border_dark); draw_3d_border(ctx, dialog_x + swat_offset + swat_distance * 8,
+    // swats_y, 20, 20, 1);
+
+    // draw_rect(ctx, dialog_x + swat_offset + swat_distance * 9, swats_y, 20, 20,
+    // ctx->theme[ctx->themeActive].border_light); draw_3d_border(ctx, dialog_x + swat_offset + swat_distance * 9,
+    // swats_y, 20, 20, 1);
+
+    // draw_rect(ctx, dialog_x + swat_offset + swat_distance * 10, swats_y, 20, 20,
+    // ctx->theme[ctx->themeActive].title_bg); draw_3d_border(ctx, dialog_x + swat_offset + swat_distance * 10, swats_y,
+    // 20, 20, 1);
+
     draw_text_centered(
         ctx,
         dialog_x,
-        content_y + 60,
+        swats_y + 200,
         dialog_w,
-        "A Virtual Memory System for badges",
-        CDE_INACTIVE_TEXT
+        "Press ENTER or ESC to save or close",
+        ctx->theme[ctx->themeActive].text_inactive
     );
-
-    draw_text_centered(ctx, dialog_x, content_y + 60, dialog_w, "Press ENTER or ESC to close", CDE_INACTIVE_TEXT);
 }
 
-static void draw_launcher_window(Launcher_Context *ctx) {
+static void draw_launcher_window(Context *ctx) {
     int window_x = 30;
     int window_y = 30;
     int window_w = SCREEN_WIDTH - 60;
     int window_h = SCREEN_HEIGHT - 60;
 
-    draw_rect(ctx, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, CDE_BG_COLOR);
+    draw_rect(ctx, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, ctx->theme[ctx->themeActive].bg);
 
-    draw_rect(ctx, window_x, window_y, window_w, window_h, CDE_PANEL_COLOR);
-    draw_3d_border(ctx, window_x, window_y, window_w, window_h, 0);
+    draw_rect(ctx, window_x, window_y, window_w, window_h, ctx->theme[ctx->themeActive].panel);
+    draw_3d_border(ctx, window_x, window_y, window_w, window_h, 0, ctx->themeActive);
 
     int title_h = 45;
-    draw_rect(ctx, window_x + 3, window_y + 3, window_w - 6, title_h, CDE_TITLE_BG);
-    draw_text_bold(ctx, window_x + 15, window_y + 11, "WHY Application Launcher", CDE_SELECTED_TEXT);
+    draw_rect(ctx, window_x + 3, window_y + 3, window_w - 6, title_h, ctx->theme[ctx->themeActive].title_bg);
+    draw_text_bold(
+        ctx,
+        window_x + 15,
+        window_y + 11,
+        "WHY Application Launcher",
+        ctx->theme[ctx->themeActive].text_selected
+    );
 
     char count_text[64];
     if (ctx->total_items == 1) {
@@ -189,14 +245,14 @@ static void draw_launcher_window(Launcher_Context *ctx) {
     } else {
         snprintf(count_text, sizeof(count_text), "%d Applications Available", ctx->total_items);
     }
-    draw_text(ctx, window_x + 15, window_y + title_h + 20, count_text, CDE_TEXT_COLOR);
+    draw_text(ctx, window_x + 15, window_y + title_h + 20, count_text, ctx->theme[ctx->themeActive].text);
 
     int list_y      = window_y + title_h + 55;
     int list_h      = window_h - title_h - 110;
     int item_height = 80;
 
-    draw_rect(ctx, window_x + 15, list_y, window_w - 30, list_h, 0xFFFFFF);
-    draw_3d_border(ctx, window_x + 15, list_y, window_w - 30, list_h, 1);
+    draw_rect(ctx, window_x + 15, list_y, window_w - 30, list_h, ctx->theme[ctx->themeActive].fg);
+    draw_3d_border(ctx, window_x + 15, list_y, window_w - 30, list_h, 1, ctx->themeActive);
 
     ctx->items_per_page = (list_h - 6) / item_height;
     int visible_start   = ctx->scroll_offset;
@@ -210,18 +266,20 @@ static void draw_launcher_window(Launcher_Context *ctx) {
         int item_w = window_w - 36;
 
         if (i == ctx->selected_item) {
-            draw_rect(ctx, item_x, item_y, item_w, item_height - 2, CDE_SELECTED_BG);
+            draw_rect(ctx, item_x, item_y, item_w, item_height - 2, ctx->theme[ctx->themeActive].selected_bg);
         }
 
-        uint32_t text_color = (i == ctx->selected_item) ? CDE_SELECTED_TEXT : CDE_TEXT_COLOR;
+        uint16_t text_color =
+            (i == ctx->selected_item) ? ctx->theme[ctx->themeActive].text_selected : ctx->theme[ctx->themeActive].text;
 
         int icon_size = 48;
         int icon_x    = item_x + 10;
         int icon_y    = item_y + (item_height - icon_size) / 2;
 
-        uint32_t icon_color = (i == ctx->selected_item) ? CDE_SELECTED_TEXT : CDE_BUTTON_COLOR;
+        uint16_t icon_color = (i == ctx->selected_item) ? ctx->theme[ctx->themeActive].text_selected
+                                                        : ctx->theme[ctx->themeActive].button;
         draw_rect(ctx, icon_x, icon_y, icon_size, icon_size, icon_color);
-        draw_3d_border(ctx, icon_x, icon_y, icon_size, icon_size, 1);
+        draw_3d_border(ctx, icon_x, icon_y, icon_size, icon_size, 1, ctx->themeActive);
 
         int text_x = icon_x + icon_size + 15;
         draw_text_bold(ctx, text_x, item_y + 10, ctx->applications[i]->name, text_color);
@@ -251,7 +309,7 @@ static void draw_launcher_window(Launcher_Context *ctx) {
 #endif
 
         if (i < visible_end - 1) {
-            draw_rect(ctx, item_x, item_y + item_height - 2, item_w, 1, CDE_BORDER_DARK);
+            draw_rect(ctx, item_x, item_y + item_height - 2, item_w, 1, ctx->theme[ctx->themeActive].border_dark);
         }
     }
 
@@ -260,8 +318,8 @@ static void draw_launcher_window(Launcher_Context *ctx) {
         int scrollbar_y = list_y + 3;
         int scrollbar_h = list_h - 6;
 
-        draw_rect(ctx, scrollbar_x, scrollbar_y, 20, scrollbar_h, CDE_BUTTON_COLOR);
-        draw_3d_border(ctx, scrollbar_x, scrollbar_y, 20, scrollbar_h, 1);
+        draw_rect(ctx, scrollbar_x, scrollbar_y, 20, scrollbar_h, ctx->theme[ctx->themeActive].button);
+        draw_3d_border(ctx, scrollbar_x, scrollbar_y, 20, scrollbar_h, 1, ctx->themeActive);
 
         int thumb_h = (scrollbar_h * ctx->items_per_page) / ctx->total_items;
         if (thumb_h < 30)
@@ -272,28 +330,59 @@ static void draw_launcher_window(Launcher_Context *ctx) {
             thumb_y += ((scrollbar_h - thumb_h) * ctx->scroll_offset) / (ctx->total_items - ctx->items_per_page);
         }
 
-        draw_rect(ctx, scrollbar_x + 3, thumb_y, 14, thumb_h, CDE_PANEL_COLOR);
-        draw_3d_border(ctx, scrollbar_x + 3, thumb_y, 14, thumb_h, 0);
+        draw_rect(ctx, scrollbar_x + 3, thumb_y, 14, thumb_h, ctx->theme[ctx->themeActive].panel);
+        draw_3d_border(ctx, scrollbar_x + 3, thumb_y, 14, thumb_h, 0, ctx->themeActive);
     }
 
-    draw_rect(ctx, window_x + 3, window_y + window_h - 42, window_w - 6, 39, CDE_BUTTON_COLOR);
-    draw_3d_border(ctx, window_x + 3, window_y + window_h - 42, window_w - 6, 39, 1);
+    draw_rect(ctx, window_x + 3, window_y + window_h - 42, window_w - 6, 39, ctx->theme[ctx->themeActive].button);
+    draw_3d_border(ctx, window_x + 3, window_y + window_h - 42, window_w - 6, 39, 1, ctx->themeActive);
 
     draw_text(
         ctx,
         window_x + 15,
         window_y + window_h - 35,
-        "UP/DOWN: Navigate  ENTER: Launch  A: About  ESC: Exit",
-        CDE_TEXT_COLOR
+        "UP/DOWN: Navigate  ENTER: Launch  S: Settings  ESC: Exit",
+        ctx->theme[ctx->themeActive].text
     );
 }
 
-static void handle_keyboard(Launcher_Context *ctx, keyboard_scancode_t key_code) {
-    if (ctx->show_about) {
-        if (key_code == KEY_SCANCODE_ESCAPE || key_code == KEY_SCANCODE_RETURN || key_code == KEY_SCANCODE_SPACE) {
-            ctx->show_about = false;
-        }
-        return;
+static void handle_keyboard_settings(Context *ctx, keyboard_scancode_t key_code) {
+    switch (key_code) {
+        case KEY_SCANCODE_SQUARE: ctx->themeActive = 0; break;
+
+        case KEY_SCANCODE_TRIANGLE: ctx->themeActive = 1; break;
+
+        case KEY_SCANCODE_CROSS: ctx->themeActive = 2; break;
+
+        case KEY_SCANCODE_CIRCLE: ctx->themeActive = 3; break;
+
+        case KEY_SCANCODE_CLOUD: ctx->buzz = true; break;
+
+        case KEY_SCANCODE_DIAMOND: ctx->buzz = false; break;
+
+        case KEY_SCANCODE_LEFT:
+            if (ctx->themeActive > 0) {
+                ctx->themeActive -= 1;
+            } else {
+                ctx->themeActive = 3;
+            }
+            break;
+
+        case KEY_SCANCODE_RIGHT:
+            if (ctx->themeActive < 3) {
+                ctx->themeActive += 1;
+            } else {
+                ctx->themeActive = 0;
+            }
+            break;
+        case KEY_SCANCODE_ESCAPE: ctx->show_settings = false; break;
+    }
+}
+
+static void handle_keyboard(Context *ctx, keyboard_scancode_t key_code) {
+
+    if (ctx->show_settings) {
+        return handle_keyboard_settings(ctx, key_code);
     }
 
     switch (key_code) {
@@ -321,24 +410,90 @@ static void handle_keyboard(Launcher_Context *ctx, keyboard_scancode_t key_code)
             application_launch(ctx->applications[ctx->selected_item]->unique_identifier);
             break;
 
-        case KEY_SCANCODE_A: ctx->show_about = true; break;
+        case KEY_SCANCODE_S:
+            ctx->show_settings = true;
+            break;
+            //      case KEY_SCANCODE_T: switchTheme(ctx); break;
 
-        case KEY_SCANCODE_ESCAPE: {
-            ctx->quit = true;
-        } break;
+        case KEY_SCANCODE_V:
+            ctx->buzz = !ctx->buzz;
+            /* gpio_set_direction(GPIO_NUM_8, GPIO_MODE_OUTPUT); */
+            /* gpio_set_level(GPIO_NUM_8, ctx->buzz); */
+            break;
+
+        case KEY_SCANCODE_D:
+            // ctx->bl = !ctx->bl;
+            break;
+
+        case KEY_SCANCODE_ESCAPE: ctx->quit = true; break;
     }
 }
 
 static bool run_launcher(application_t **applications, size_t num) {
     printf("Starting application launcher with %zu applications\n", num);
 
-    Launcher_Context ctx = {0};
-    ctx.applications     = applications;
-    ctx.total_items      = num;
-    ctx.selected_item    = 0;
-    ctx.scroll_offset    = 0;
-    ctx.show_about       = false;
-    ctx.quit             = false;
+    Context ctx = {0};
+
+    ctx.theme[0].bg            = 0x9d13;
+    ctx.theme[0].fg            = 0xFFFF;
+    ctx.theme[0].panel         = 0xad96;
+    ctx.theme[0].border_light  = 0xffff;
+    ctx.theme[0].border_dark   = 0x630C;
+    ctx.theme[0].text          = 0x0000;
+    ctx.theme[0].selected_bg   = 0x03DA;
+    ctx.theme[0].text_selected = 0xFFFF;
+    ctx.theme[0].button        = 0xd678;
+    ctx.theme[0].title_bg      = 0x8410;
+    ctx.theme[0].text_inactive = 0x8410;
+    ctx.theme[0].popup         = 0x0500;
+
+    ctx.theme[1].bg            = 0x0000;
+    ctx.theme[1].fg            = 0xbe19;
+    ctx.theme[1].panel         = 0x4a8b;
+    ctx.theme[1].border_light  = 0x41e8;
+    ctx.theme[1].border_dark   = 0x3186;
+    ctx.theme[1].text          = 0xbf2c;
+    ctx.theme[1].selected_bg   = 0x2121;
+    ctx.theme[1].text_selected = 0xffff;
+    ctx.theme[1].button        = 0x2121;
+    ctx.theme[1].title_bg      = 0x1111;
+    ctx.theme[1].text_inactive = 0xbbbb;
+    ctx.theme[1].popup         = 0x0000;
+
+    ctx.theme[2].bg            = 0x2966;
+    ctx.theme[2].fg            = 0xbe19;
+    ctx.theme[2].panel         = 0x4a8b;
+    ctx.theme[2].border_light  = 0x41e8;
+    ctx.theme[2].border_dark   = 0x3186;
+    ctx.theme[2].selected_bg   = 0x2125;
+    ctx.theme[2].text          = 0xad1b;
+    ctx.theme[2].text_selected = 0xffff;
+    ctx.theme[2].button        = 0xd678;
+    ctx.theme[2].title_bg      = 0xbe19;
+    ctx.theme[2].text_inactive = 0xbe19;
+    ctx.theme[2].popup         = 0x528a;
+
+    ctx.theme[3].bg            = 0x2966;
+    ctx.theme[3].fg            = 0xbe19;
+    ctx.theme[3].panel         = 0x4a8b;
+    ctx.theme[3].border_light  = 0x41e8;
+    ctx.theme[3].border_dark   = 0x3186;
+    ctx.theme[3].text          = 0xbf2c;
+    ctx.theme[3].selected_bg   = 0x2125;
+    ctx.theme[3].text_selected = 0xffff;
+    ctx.theme[3].button        = 0xd678;
+    ctx.theme[3].title_bg      = 0xbe19;
+    ctx.theme[3].text_inactive = 0xbe19;
+    ctx.theme[3].popup         = 0x528a;
+
+    ctx.themeActive = 0;
+
+    ctx.applications  = applications;
+    ctx.total_items   = num;
+    ctx.selected_item = 0;
+    ctx.scroll_offset = 0;
+    ctx.show_settings = false;
+    ctx.quit          = false;
 
     ctx.window = window_create(
         "Application Launcher",
@@ -350,6 +505,7 @@ static bool run_launcher(application_t **applications, size_t num) {
         printf("Window could not be created\n");
         return false;
     }
+
 
     ctx.framebuffer = window_framebuffer_create(
         ctx.window,
@@ -370,8 +526,8 @@ static bool run_launcher(application_t **applications, size_t num) {
 
         draw_launcher_window(&ctx);
 
-        if (ctx.show_about) {
-            draw_about_dialog(&ctx);
+        if (ctx.show_settings) {
+            draw_settings_dialog(&ctx);
         }
 
         window_present(ctx.window, true, NULL, 0);
@@ -388,26 +544,30 @@ static bool run_launcher(application_t **applications, size_t num) {
 }
 
 int main(int argc, char *argv[]) {
-    size_t                  num_apps = 0;
-    application_t          *app;
-    application_list_handle app_list = application_list(&app);
+    size_t num_apps = 0;
+    application_t *this;
+    application_list_handle app_list = application_list(&this);
     application_t         **apps     = NULL;
 
+
     printf("Currently installed applications: \n");
-    while (app) {
-        printf("Name: %s\n", app->name);
-        printf("  UID: %s\n", app->unique_identifier);
-        printf("  Version: %s\n", app->version);
-        printf("  Binary : %s\n", app->binary_path);
-        if (app->binary_path && strlen(app->binary_path) && app->unique_identifier &&
-            (strcmp(app->unique_identifier, "badgevms_launcher") != 0) &&
-            (strcmp(app->unique_identifier, "why2025_firmware_ota_c6") != 0)) {
+    while (this) {
+        printf("Name: %s\n", this->name);
+        printf("  UID: %s\n", this->unique_identifier);
+        printf("  Version: %s\n", this->version);
+        printf("  Binary : %s\n", this->binary_path);
+        if (this->binary_path && strlen(this->binary_path) && this->unique_identifier &&
+            (strcmp(this->unique_identifier, "badgevms_launcher") != 0) &&
+            (strcmp(this->unique_identifier, "doom_launcher") != 0) &&
+            (strcmp(this->unique_identifier, "why2025_firmware_ota_c6") != 0)) {
             ++num_apps;
             apps               = realloc(apps, sizeof(application_t *) * num_apps);
-            apps[num_apps - 1] = app;
+            apps[num_apps - 1] = this;
         }
-        app = application_list_get_next(app_list);
+        this = application_list_get_next(app_list);
     }
 
     run_launcher(apps, num_apps);
+
+    return 0;
 }
