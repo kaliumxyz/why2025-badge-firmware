@@ -243,6 +243,10 @@ static void draw_settings_dialog(Context *ctx) {
 
     // cursor
     draw_rect(ctx, dialog_x + swat_offset + 30 * ctx->themeCursor, swats_y + 100 + 60, 15, 8, 0xffc0);
+    if (ctx->capture.enabled) {
+        draw_rect(ctx, dialog_x + swat_offset + 30 * ctx->themeCursor, swats_y + 100 + 78, 80, 20, 0x0000);
+        draw_text(ctx, dialog_x + swat_offset + 30 * ctx->themeCursor, swats_y + 100 + 80, ctx->capture.buffer, 0xffff);
+    }
 
     draw_3d_border(ctx, dialog_x + swat_offset - 5, swats_y + 100, 30 * 12, 75, 1, ctx->themeActive);
 
@@ -398,7 +402,7 @@ static void draw_launcher_window(Context *ctx) {
     );
 }
 
-#define SAVE_FILE "APPS:[badgevms_launcher]theme.txt"
+#define SAVE_FILE "APPS:[doom_launcher]theme.txt"
 
 static bool load(Context *ctx) {
     FILE *file = fopen(SAVE_FILE, "r");
@@ -418,12 +422,12 @@ static bool load(Context *ctx) {
         if (index >= 0 && index < 4) {
             ctx->themeActive = index;
         }
-        printf("%X", index);
+        printf("current index: %i", index);
     }
 
     for (int i = 0; i < 3; i++) {
         for (int j = 0; j < 12; j++) {
-            printf("%X", buffer[i * offset + j]);
+            printf("hex: %c", buffer[i * offset + j]);
         }
         ctx->theme[i].bg            = buffer[i * offset + 1];
         ctx->theme[i].fg            = buffer[i * offset + 2];
@@ -483,12 +487,19 @@ static bool save(Context *ctx) {
     return true;
 }
 
+static inline uint16_t rgb888_to_rgb565_color(uint32_t rgb888) {
+    uint8_t r = (rgb888 >> 16) & 0xFF;
+    uint8_t g = (rgb888 >> 8) & 0xFF;
+    uint8_t b = rgb888 & 0xFF;
+    return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+}
+
 /**
  * hex2int
  * take a hex string and convert it to a 32bit number (max 8 hex digits)
  */
-uint16_t hex2int(char *hex) {
-    uint16_t val = 0;
+static uint16_t hex2int(char *hex) {
+    uint32_t val = 0;
     while (*hex) {
         // get current character then increment
         uint8_t byte = *hex++;
@@ -502,11 +513,34 @@ uint16_t hex2int(char *hex) {
         // shift 4 to make space for new digit, and add the 4 bits of the new digit
         val = (val << 4) | (byte & 0xF);
     }
-    return val;
+
+    return rgb888_to_rgb565_color(val);
+}
+
+// static void int2hex(uint16_t number, char *buffer) {
+//     uint16_t copy = number;
+//     uint8_t byte1 = copy
+//     uint8_t byte2 = (copy << 4) & 0xff
+
+//         // shift 4 to make space for new digit, and add the 4 bits of the new digit
+//         top = (top << 4) | (byte & 0xF);
+//     }
+
+//     return rgb888_to_rgb565_color(val);
+// }
+
+static void inttostr(uint16_t value, char buffer[]) {
+    buffer[5] = "0123456789ABCDEF"[(value >> 12) & 0xf];
+    buffer[4] = "0123456789ABCDEF"[(value >> 8) & 0xf];
+    buffer[3] = "0123456789ABCDEF"[(value >> 4) & 0xf];
+    buffer[2] = "0123456789ABCDEF"[value & 0xf];
+
+    printf("%s", buffer);
 }
 
 static void handle_keyboard_capture(Context *ctx, keyboard_scancode_t key_code) {
-    if (ctx->capture.count > 3) {
+    printf("setting %s", ctx->capture.buffer);
+    if (ctx->capture.count > 5) {
         switch (ctx->themeCursor) {
             case 0: ctx->theme[ctx->themeActive].bg = hex2int(ctx->capture.buffer); break;
             case 1: ctx->theme[ctx->themeActive].fg = hex2int(ctx->capture.buffer); break;
@@ -521,31 +555,29 @@ static void handle_keyboard_capture(Context *ctx, keyboard_scancode_t key_code) 
             case 10: ctx->theme[ctx->themeActive].text_inactive = hex2int(ctx->capture.buffer); break;
             case 11: ctx->theme[ctx->themeActive].popup = hex2int(ctx->capture.buffer); break;
         }
-        ctx->capture.buffer  = "";
-        ctx->capture.count   = 0;
+        ctx->capture.count   = 2;
         ctx->capture.enabled = false;
         return;
     }
     switch (key_code) {
-        case KEY_SCANCODE_0: ctx->capture.buffer += '0'; break;
-        case KEY_SCANCODE_1: ctx->capture.buffer += '1'; break;
-        case KEY_SCANCODE_2: ctx->capture.buffer += '2'; break;
-        case KEY_SCANCODE_3: ctx->capture.buffer += '3'; break;
-        case KEY_SCANCODE_4: ctx->capture.buffer += '4'; break;
-        case KEY_SCANCODE_5: ctx->capture.buffer += '5'; break;
-        case KEY_SCANCODE_6: ctx->capture.buffer += '6'; break;
-        case KEY_SCANCODE_7: ctx->capture.buffer += '7'; break;
-        case KEY_SCANCODE_8: ctx->capture.buffer += '8'; break;
-        case KEY_SCANCODE_9: ctx->capture.buffer += '9'; break;
-        case KEY_SCANCODE_A: ctx->capture.buffer += 'a'; break;
-        case KEY_SCANCODE_B: ctx->capture.buffer += 'b'; break;
-        case KEY_SCANCODE_C: ctx->capture.buffer += 'c'; break;
-        case KEY_SCANCODE_D: ctx->capture.buffer += 'd'; break;
-        case KEY_SCANCODE_E: ctx->capture.buffer += 'e'; break;
-        case KEY_SCANCODE_F: ctx->capture.buffer += 'f'; break;
+        case KEY_SCANCODE_0: ctx->capture.buffer[ctx->capture.count++] = '0'; break;
+        case KEY_SCANCODE_1: ctx->capture.buffer[ctx->capture.count++] = '1'; break;
+        case KEY_SCANCODE_2: ctx->capture.buffer[ctx->capture.count++] = '2'; break;
+        case KEY_SCANCODE_3: ctx->capture.buffer[ctx->capture.count++] = '3'; break;
+        case KEY_SCANCODE_4: ctx->capture.buffer[ctx->capture.count++] = '4'; break;
+        case KEY_SCANCODE_5: ctx->capture.buffer[ctx->capture.count++] = '5'; break;
+        case KEY_SCANCODE_6: ctx->capture.buffer[ctx->capture.count++] = '6'; break;
+        case KEY_SCANCODE_7: ctx->capture.buffer[ctx->capture.count++] = '7'; break;
+        case KEY_SCANCODE_8: ctx->capture.buffer[ctx->capture.count++] = '8'; break;
+        case KEY_SCANCODE_9: ctx->capture.buffer[ctx->capture.count++] = '9'; break;
+        case KEY_SCANCODE_A: ctx->capture.buffer[ctx->capture.count++] = 'a'; break;
+        case KEY_SCANCODE_B: ctx->capture.buffer[ctx->capture.count++] = 'b'; break;
+        case KEY_SCANCODE_C: ctx->capture.buffer[ctx->capture.count++] = 'c'; break;
+        case KEY_SCANCODE_D: ctx->capture.buffer[ctx->capture.count++] = 'd'; break;
+        case KEY_SCANCODE_E: ctx->capture.buffer[ctx->capture.count++] = 'e'; break;
+        case KEY_SCANCODE_F: ctx->capture.buffer[ctx->capture.count++] = 'f'; break;
         case KEY_SCANCODE_ESCAPE: ctx->capture.enabled = false; break;
     }
-    ctx->capture.count++;
 }
 
 static void handle_keyboard_settings(Context *ctx, keyboard_scancode_t key_code) {
@@ -599,7 +631,24 @@ static void handle_keyboard_settings(Context *ctx, keyboard_scancode_t key_code)
 
         case KEY_SCANCODE_SPACE:
             ctx->capture.enabled = true;
-            ctx->capture.buffer  = "";
+
+
+            switch (ctx->themeCursor) {
+                case 0: inttostr(ctx->theme[ctx->themeActive].bg, ctx->capture.buffer); break;
+                case 1: inttostr(ctx->theme[ctx->themeActive].fg, ctx->capture.buffer); break;
+                case 2: inttostr(ctx->theme[ctx->themeActive].panel, ctx->capture.buffer); break;
+                case 3: inttostr(ctx->theme[ctx->themeActive].border_light, ctx->capture.buffer); break;
+                case 4: inttostr(ctx->theme[ctx->themeActive].border_dark, ctx->capture.buffer); break;
+                case 5: inttostr(ctx->theme[ctx->themeActive].text, ctx->capture.buffer); break;
+                case 6: inttostr(ctx->theme[ctx->themeActive].selected_bg, ctx->capture.buffer); break;
+                case 7: inttostr(ctx->theme[ctx->themeActive].text_selected, ctx->capture.buffer); break;
+                case 8: inttostr(ctx->theme[ctx->themeActive].button, ctx->capture.buffer); break;
+                case 9: inttostr(ctx->theme[ctx->themeActive].title_bg, ctx->capture.buffer); break;
+                case 10: inttostr(ctx->theme[ctx->themeActive].text_inactive, ctx->capture.buffer); break;
+                case 11: inttostr(ctx->theme[ctx->themeActive].popup, ctx->capture.buffer); break;
+            }
+            ctx->capture.count  = 2;
+            ctx->capture.buffer = "0x";
             break;
 
         case KEY_SCANCODE_UP:
@@ -648,10 +697,8 @@ static void handle_keyboard_settings(Context *ctx, keyboard_scancode_t key_code)
 }
 
 static void handle_keyboard(Context *ctx, keyboard_scancode_t key_code) {
-    if (ctx->capture.enabled && ctx->capture.count < ctx->capture.max) {
+    if (ctx->capture.enabled) {
         return handle_keyboard_capture(ctx, key_code);
-    } else {
-        ctx->capture.enabled = false;
     }
 
     if (ctx->show_settings) {
@@ -768,9 +815,9 @@ static bool run_launcher(application_t **applications, size_t num) {
     }
 
 
-    char keystroke_buffer[64];
+    char keystroke_buffer[64] = "0x";
 
-    Capture cap = {enabled : false, buffer : keystroke_buffer};
+    Capture cap = {enabled : false, buffer : keystroke_buffer, count : 2};
 
     ctx.capture = cap;
 
