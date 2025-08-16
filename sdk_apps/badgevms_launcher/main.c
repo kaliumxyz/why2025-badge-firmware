@@ -246,6 +246,14 @@ static void draw_settings_dialog(Context *ctx) {
     if (ctx->capture.enabled) {
         draw_rect(ctx, dialog_x + swat_offset + 30 * ctx->themeCursor, swats_y + 100 + 78, 80, 20, 0x0000);
         draw_text(ctx, dialog_x + swat_offset + 30 * ctx->themeCursor, swats_y + 100 + 80, ctx->capture.buffer, 0xffff);
+        draw_rect(
+            ctx,
+            dialog_x + swat_offset + 8 + 30 * ctx->themeCursor + ctx->capture.count * 12,
+            swats_y + 100 + 90,
+            5,
+            8,
+            0xffc0
+        );
     }
 
     draw_3d_border(ctx, dialog_x + swat_offset - 5, swats_y + 100, 30 * 12, 75, 1, ctx->themeActive);
@@ -514,7 +522,9 @@ static uint16_t hex2int(char *hex) {
         val = (val << 4) | (byte & 0xF);
     }
 
-    return rgb888_to_rgb565_color(val);
+
+    return val;
+    // return rgb888_to_rgb565_color(val);
 }
 
 // static void int2hex(uint16_t number, char *buffer) {
@@ -534,31 +544,38 @@ static void inttostr(uint16_t value, char buffer[]) {
     buffer[4] = "0123456789ABCDEF"[(value >> 8) & 0xf];
     buffer[3] = "0123456789ABCDEF"[(value >> 4) & 0xf];
     buffer[2] = "0123456789ABCDEF"[value & 0xf];
+    buffer[1] = 'X';
+    buffer[0] = '0';
 
-    printf("%s", buffer);
+    printf("buffer is: %s", buffer);
+}
+
+static void themeApply(Context *ctx) {
+    switch (ctx->themeCursor) {
+        case 0: ctx->theme[ctx->themeActive].bg = hex2int(ctx->capture.buffer); break;
+        case 1: ctx->theme[ctx->themeActive].fg = hex2int(ctx->capture.buffer); break;
+        case 2: ctx->theme[ctx->themeActive].panel = hex2int(ctx->capture.buffer); break;
+        case 3: ctx->theme[ctx->themeActive].border_light = hex2int(ctx->capture.buffer); break;
+        case 4: ctx->theme[ctx->themeActive].border_dark = hex2int(ctx->capture.buffer); break;
+        case 5: ctx->theme[ctx->themeActive].text = hex2int(ctx->capture.buffer); break;
+        case 6: ctx->theme[ctx->themeActive].selected_bg = hex2int(ctx->capture.buffer); break;
+        case 7: ctx->theme[ctx->themeActive].text_selected = hex2int(ctx->capture.buffer); break;
+        case 8: ctx->theme[ctx->themeActive].button = hex2int(ctx->capture.buffer); break;
+        case 9: ctx->theme[ctx->themeActive].title_bg = hex2int(ctx->capture.buffer); break;
+        case 10: ctx->theme[ctx->themeActive].text_inactive = hex2int(ctx->capture.buffer); break;
+        case 11: ctx->theme[ctx->themeActive].popup = hex2int(ctx->capture.buffer); break;
+    }
+    ctx->capture.count   = 2;
+    ctx->capture.enabled = false;
 }
 
 static void handle_keyboard_capture(Context *ctx, keyboard_scancode_t key_code) {
-    printf("setting %s", ctx->capture.buffer);
     if (ctx->capture.count > 5) {
-        switch (ctx->themeCursor) {
-            case 0: ctx->theme[ctx->themeActive].bg = hex2int(ctx->capture.buffer); break;
-            case 1: ctx->theme[ctx->themeActive].fg = hex2int(ctx->capture.buffer); break;
-            case 2: ctx->theme[ctx->themeActive].panel = hex2int(ctx->capture.buffer); break;
-            case 3: ctx->theme[ctx->themeActive].border_light = hex2int(ctx->capture.buffer); break;
-            case 4: ctx->theme[ctx->themeActive].border_dark = hex2int(ctx->capture.buffer); break;
-            case 5: ctx->theme[ctx->themeActive].text = hex2int(ctx->capture.buffer); break;
-            case 6: ctx->theme[ctx->themeActive].selected_bg = hex2int(ctx->capture.buffer); break;
-            case 7: ctx->theme[ctx->themeActive].text_selected = hex2int(ctx->capture.buffer); break;
-            case 8: ctx->theme[ctx->themeActive].button = hex2int(ctx->capture.buffer); break;
-            case 9: ctx->theme[ctx->themeActive].title_bg = hex2int(ctx->capture.buffer); break;
-            case 10: ctx->theme[ctx->themeActive].text_inactive = hex2int(ctx->capture.buffer); break;
-            case 11: ctx->theme[ctx->themeActive].popup = hex2int(ctx->capture.buffer); break;
-        }
-        ctx->capture.count   = 2;
-        ctx->capture.enabled = false;
+
+        themeApply(ctx);
         return;
     }
+
     switch (key_code) {
         case KEY_SCANCODE_0: ctx->capture.buffer[ctx->capture.count++] = '0'; break;
         case KEY_SCANCODE_1: ctx->capture.buffer[ctx->capture.count++] = '1'; break;
@@ -576,7 +593,37 @@ static void handle_keyboard_capture(Context *ctx, keyboard_scancode_t key_code) 
         case KEY_SCANCODE_D: ctx->capture.buffer[ctx->capture.count++] = 'd'; break;
         case KEY_SCANCODE_E: ctx->capture.buffer[ctx->capture.count++] = 'e'; break;
         case KEY_SCANCODE_F: ctx->capture.buffer[ctx->capture.count++] = 'f'; break;
-        case KEY_SCANCODE_ESCAPE: ctx->capture.enabled = false; break;
+        case KEY_SCANCODE_LEFT:
+            if (ctx->capture.count > 2)
+                ctx->capture.count--;
+            break;
+        case KEY_SCANCODE_RIGHT:
+            if (++ctx->capture.count > 5) {
+                ctx->capture.count = 2;
+            }
+            break;
+        case KEY_SCANCODE_UP:
+            ctx->capture.buffer[ctx->capture.count] =
+                "0123456789ABCDEF"[(hex2int(&ctx->capture.buffer[ctx->capture.count]) + 1) % 15];
+            break;
+        case KEY_SCANCODE_DOWN:
+            int num = hex2int(&ctx->capture.buffer[ctx->capture.count]) - 1;
+            if (num < 0) {
+                num = 15 + num;
+            }
+            ctx->capture.buffer[ctx->capture.count] = "0123456789ABCDEF"[num];
+            break;
+        case KEY_SCANCODE_SPACE: themeApply(ctx); break;
+
+        case KEY_SCANCODE_BACKSPACE:
+            if (ctx->capture.count > 2) {
+                ctx->capture.buffer[ctx->capture.count--] = '0';
+            }
+            break;
+        case KEY_SCANCODE_ESCAPE:
+            ctx->capture.enabled = false;
+            ctx->capture.count   = 0;
+            break;
     }
 }
 
@@ -639,16 +686,15 @@ static void handle_keyboard_settings(Context *ctx, keyboard_scancode_t key_code)
                 case 2: inttostr(ctx->theme[ctx->themeActive].panel, ctx->capture.buffer); break;
                 case 3: inttostr(ctx->theme[ctx->themeActive].border_light, ctx->capture.buffer); break;
                 case 4: inttostr(ctx->theme[ctx->themeActive].border_dark, ctx->capture.buffer); break;
-                case 5: inttostr(ctx->theme[ctx->themeActive].text, ctx->capture.buffer); break;
+                case 5: inttostr(ctx->theme[ctx->themeActive].button, ctx->capture.buffer); break;
                 case 6: inttostr(ctx->theme[ctx->themeActive].selected_bg, ctx->capture.buffer); break;
                 case 7: inttostr(ctx->theme[ctx->themeActive].text_selected, ctx->capture.buffer); break;
-                case 8: inttostr(ctx->theme[ctx->themeActive].button, ctx->capture.buffer); break;
+                case 8: inttostr(ctx->theme[ctx->themeActive].text, ctx->capture.buffer); break;
                 case 9: inttostr(ctx->theme[ctx->themeActive].title_bg, ctx->capture.buffer); break;
                 case 10: inttostr(ctx->theme[ctx->themeActive].text_inactive, ctx->capture.buffer); break;
                 case 11: inttostr(ctx->theme[ctx->themeActive].popup, ctx->capture.buffer); break;
             }
-            ctx->capture.count  = 2;
-            ctx->capture.buffer = "0x";
+            ctx->capture.count = 2;
             break;
 
         case KEY_SCANCODE_UP:
@@ -658,10 +704,10 @@ static void handle_keyboard_settings(Context *ctx, keyboard_scancode_t key_code)
                 case 2: ctx->theme[ctx->themeActive].panel++; break;
                 case 3: ctx->theme[ctx->themeActive].border_light++; break;
                 case 4: ctx->theme[ctx->themeActive].border_dark++; break;
-                case 5: ctx->theme[ctx->themeActive].text++; break;
+                case 5: ctx->theme[ctx->themeActive].button++; break;
                 case 6: ctx->theme[ctx->themeActive].selected_bg++; break;
                 case 7: ctx->theme[ctx->themeActive].text_selected++; break;
-                case 8: ctx->theme[ctx->themeActive].button++; break;
+                case 8: ctx->theme[ctx->themeActive].text++; break;
                 case 9: ctx->theme[ctx->themeActive].title_bg++; break;
                 case 10: ctx->theme[ctx->themeActive].text_inactive++; break;
                 case 11: ctx->theme[ctx->themeActive].popup++; break;
@@ -675,10 +721,10 @@ static void handle_keyboard_settings(Context *ctx, keyboard_scancode_t key_code)
                 case 2: ctx->theme[ctx->themeActive].panel--; break;
                 case 3: ctx->theme[ctx->themeActive].border_light--; break;
                 case 4: ctx->theme[ctx->themeActive].border_dark--; break;
-                case 5: ctx->theme[ctx->themeActive].text--; break;
+                case 5: ctx->theme[ctx->themeActive].button--; break;
                 case 6: ctx->theme[ctx->themeActive].selected_bg--; break;
                 case 7: ctx->theme[ctx->themeActive].text_selected--; break;
-                case 8: ctx->theme[ctx->themeActive].button--; break;
+                case 8: ctx->theme[ctx->themeActive].text--; break;
                 case 9: ctx->theme[ctx->themeActive].title_bg--; break;
                 case 10: ctx->theme[ctx->themeActive].text_inactive--; break;
                 case 11: ctx->theme[ctx->themeActive].popup--; break;
@@ -726,8 +772,10 @@ static void handle_keyboard(Context *ctx, keyboard_scancode_t key_code) {
 
         case KEY_SCANCODE_RETURN:
         case KEY_SCANCODE_SPACE:
-            printf("Launching: %s\n", ctx->applications[ctx->selected_item]->name);
-            application_launch(ctx->applications[ctx->selected_item]->unique_identifier);
+            if (!ctx->show_settings) {
+                printf("Launching: %s\n", ctx->applications[ctx->selected_item]->name);
+                application_launch(ctx->applications[ctx->selected_item]->unique_identifier);
+            }
             break;
 
         case KEY_SCANCODE_S:
@@ -815,7 +863,7 @@ static bool run_launcher(application_t **applications, size_t num) {
     }
 
 
-    char keystroke_buffer[64] = "0x";
+    char keystroke_buffer[16] = "0x0000";
 
     Capture cap = {enabled : false, buffer : keystroke_buffer, count : 2};
 
