@@ -1,5 +1,3 @@
-
-// #include "driver/gpio.h"
 #include "font.h"
 
 #include <stdio.h>
@@ -248,7 +246,7 @@ static void draw_settings_dialog(Context *ctx) {
         draw_text(ctx, dialog_x + swat_offset + 30 * ctx->themeCursor, swats_y + 100 + 80, ctx->capture.buffer, 0xffff);
         draw_rect(
             ctx,
-            dialog_x + swat_offset + 8 + 30 * ctx->themeCursor + ctx->capture.count * 12,
+            dialog_x + swat_offset + 8 + 30 * ctx->themeCursor + ctx->capture.count * FONT_WIDTH,
             swats_y + 100 + 90,
             5,
             8,
@@ -275,9 +273,25 @@ static void draw_settings_dialog(Context *ctx) {
     draw_text_centered(
         ctx,
         dialog_x,
-        swats_y - 40,
+        swats_y - 50,
         dialog_w,
         "Press ENTER or ESC to save or close",
+        ctx->theme[ctx->themeActive].text_inactive
+    );
+    draw_text_centered(
+        ctx,
+        dialog_x,
+        swats_y - 50 + FONT_HEIGHT,
+        dialog_w,
+        "Edit colors using the arrows or SPACE",
+        ctx->theme[ctx->themeActive].text_inactive
+    );
+    draw_text_centered(
+        ctx,
+        dialog_x,
+        swats_y - 50 + FONT_HEIGHT * 2,
+        dialog_w,
+        "Switch themes with CIRCLE SQUARE ...",
         ctx->theme[ctx->themeActive].text_inactive
     );
 }
@@ -405,12 +419,12 @@ static void draw_launcher_window(Context *ctx) {
         ctx,
         window_x + 15,
         window_y + window_h - 35,
-        "UP/DOWN: Navigate  ENTER: Launch  S: Settings  ESC: Exit",
+        "UP/DOWN: Navigate  ENTER: Launch  S: Settings  F: Files  ESC: Exit",
         ctx->theme[ctx->themeActive].text
     );
 }
 
-#define SAVE_FILE "APPS:[doom_launcher]theme.txt"
+#define SAVE_FILE "APPS:[badge_launcher]theme.txt"
 
 static bool load(Context *ctx) {
     FILE *file = fopen(SAVE_FILE, "r");
@@ -587,12 +601,12 @@ static void handle_keyboard_capture(Context *ctx, keyboard_scancode_t key_code) 
         case KEY_SCANCODE_7: ctx->capture.buffer[ctx->capture.count++] = '7'; break;
         case KEY_SCANCODE_8: ctx->capture.buffer[ctx->capture.count++] = '8'; break;
         case KEY_SCANCODE_9: ctx->capture.buffer[ctx->capture.count++] = '9'; break;
-        case KEY_SCANCODE_A: ctx->capture.buffer[ctx->capture.count++] = 'a'; break;
-        case KEY_SCANCODE_B: ctx->capture.buffer[ctx->capture.count++] = 'b'; break;
-        case KEY_SCANCODE_C: ctx->capture.buffer[ctx->capture.count++] = 'c'; break;
-        case KEY_SCANCODE_D: ctx->capture.buffer[ctx->capture.count++] = 'd'; break;
-        case KEY_SCANCODE_E: ctx->capture.buffer[ctx->capture.count++] = 'e'; break;
-        case KEY_SCANCODE_F: ctx->capture.buffer[ctx->capture.count++] = 'f'; break;
+        case KEY_SCANCODE_A: ctx->capture.buffer[ctx->capture.count++] = 'A'; break;
+        case KEY_SCANCODE_B: ctx->capture.buffer[ctx->capture.count++] = 'B'; break;
+        case KEY_SCANCODE_C: ctx->capture.buffer[ctx->capture.count++] = 'C'; break;
+        case KEY_SCANCODE_D: ctx->capture.buffer[ctx->capture.count++] = 'D'; break;
+        case KEY_SCANCODE_E: ctx->capture.buffer[ctx->capture.count++] = 'E'; break;
+        case KEY_SCANCODE_F: ctx->capture.buffer[ctx->capture.count++] = 'F'; break;
         case KEY_SCANCODE_LEFT:
             if (ctx->capture.count > 2)
                 ctx->capture.count--;
@@ -608,10 +622,13 @@ static void handle_keyboard_capture(Context *ctx, keyboard_scancode_t key_code) 
             break;
         case KEY_SCANCODE_DOWN:
             int num = hex2int(&ctx->capture.buffer[ctx->capture.count]) - 1;
+            printf("down %s | %d", ctx->capture.buffer, num);
             if (num < 0) {
                 num = 15 + num;
             }
+            printf("down2 %s | %d", ctx->capture.buffer, num);
             ctx->capture.buffer[ctx->capture.count] = "0123456789ABCDEF"[num];
+            printf("down3 %s | %d", ctx->capture.buffer, num);
             break;
         case KEY_SCANCODE_SPACE: themeApply(ctx); break;
 
@@ -641,9 +658,9 @@ static void handle_keyboard_settings(Context *ctx, keyboard_scancode_t key_code)
 
         case KEY_SCANCODE_DIAMOND: ctx->buzz = false; break;
 
-        case KEY_SCANCODE_L: load(ctx); break;
+        // case KEY_SCANCODE_L: load(ctx); break;
 
-        case KEY_SCANCODE_K: save(ctx); break;
+        // case KEY_SCANCODE_K: save(ctx); break;
 
         // case KEY_SCANCODE_LEFT:
         //     if (ctx->themeActive > 0) {
@@ -939,7 +956,7 @@ int main(int argc, char *argv[]) {
         printf("  Binary : %s\n", this->binary_path);
         if (this->binary_path && strlen(this->binary_path) && this->unique_identifier &&
             (strcmp(this->unique_identifier, "badgevms_launcher") != 0) &&
-            (strcmp(this->unique_identifier, "doom_launcher") != 0) &&
+            (strcmp(this->unique_identifier, "launcher") != 0) &&
             (strcmp(this->unique_identifier, "why2025_firmware_ota_c6") != 0)) {
             ++num_apps;
             apps               = realloc(apps, sizeof(application_t *) * num_apps);
